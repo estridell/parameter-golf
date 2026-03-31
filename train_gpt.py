@@ -337,10 +337,6 @@ TQ_LEVELS = 1 << TQ_BITS
 TQ_MATRIX_MIN_SIDE = 64
 TQ_SAMPLE_MAX = 1 << 18
 TQ_SAFE_SUFFIXES = (
-    "attn.c_q.weight",
-    "attn.c_k.weight",
-    "attn.c_v.weight",
-    "attn.proj.weight",
     "mlp.fc.weight",
     "mlp.proj.weight",
 )
