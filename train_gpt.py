@@ -579,13 +579,15 @@ def quantize_state_dict(state_dict: dict[str, Tensor]):
             simple[name] = (q, s)
             stats["quant_payload_bytes"] += tensor_nbytes(q) + tensor_nbytes(s)
 
+    codebook_stored = codebook.to(dtype=torch.float16).contiguous()
+    stats["quant_payload_bytes"] += tensor_nbytes(codebook_stored)
     obj: dict[str, object] = {
         "f": "tq6h2",
         "m": matrices,
         "s": simple,
         "d": dtypes,
         "p": passthrough,
-        "c": codebook.to(dtype=torch.float16).contiguous(),
+        "c": codebook_stored,
     }
     if passthrough_orig_dtypes:
         obj["po"] = passthrough_orig_dtypes
