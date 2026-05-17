@@ -26,6 +26,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.checkpoint import checkpoint as grad_checkpoint
 
 # -----------------------------
 # HYPERPARAMETERS
@@ -69,6 +70,27 @@ class Hyperparameters:
     tie_embeddings = bool(int(os.environ.get("TIE_EMBEDDINGS", "1")))
     rope_base = float(os.environ.get("ROPE_BASE", 10000.0))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
+    caseops_enabled = bool(int(os.environ.get("CASEOPS_ENABLED", "1")))
+    asymlogit_enabled = bool(int(os.environ.get("ASYMLOGIT_ENABLED", "1")))
+    # SmearGate: blend each token with left neighbor before attention.
+    smear_gate_enabled = bool(int(os.environ.get("SMEAR_GATE_ENABLED", "1")))
+    smear_gate_width = int(os.environ.get("SMEAR_GATE_WIDTH", "12"))
+    # BigramHash: hash adjacent token pairs into a small embedding table.
+    bigram_hash_enabled = bool(int(os.environ.get("BIGRAM_HASH_ENABLED", "0")))
+    bigram_hash_size = int(os.environ.get("BIGRAM_HASH_SIZE", "4096"))
+    gradient_checkpoint_enabled = bool(int(os.environ.get("GRADIENT_CHECKPOINT_ENABLED", "0")))
+    # OrthoInit: orthogonal weight initialization
+    ortho_init_enabled = bool(int(os.environ.get("ORTHO_INIT_ENABLED", "0")))
+    # Partial RoPE: apply rotary embeddings to only first fraction of head dims
+    partial_rope_fraction = float(os.environ.get("PARTIAL_ROPE_FRACTION", "0.0"))
+    # Stride-64 eval: sliding window evaluation with stride
+    eval_stride = int(os.environ.get("EVAL_STRIDE", "0"))
+    eval_batch_seqs = int(os.environ.get("EVAL_BATCH_SEQS", "32"))
+    # LeakyReLU squared: replace relu^2 with leaky_relu^2
+    leaky_relu_enabled = bool(int(os.environ.get("LEAKY_RELU_ENABLED", "0")))
+    leaky_relu_slope = float(os.environ.get("LEAKY_RELU_SLOPE", "0.01"))
+    # Parallel residuals: run attention and MLP in parallel
+    parallel_residuals_enabled = bool(int(os.environ.get("PARALLEL_RESIDUALS_ENABLED", "0")))
 
     # Optimizer hyperparameters.
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
@@ -85,6 +107,10 @@ class Hyperparameters:
     beta2 = float(os.environ.get("BETA2", 0.95))
     adam_eps = float(os.environ.get("ADAM_EPS", 1e-8))
     grad_clip_norm = float(os.environ.get("GRAD_CLIP_NORM", 0.0))
+
+    # EMA (Exponential Moving Average) weight averaging.
+    ema_enabled = bool(int(os.environ.get("EMA_ENABLED", "0")))
+    ema_decay = float(os.environ.get("EMA_DECAY", "0.997"))
 
 # -----------------------------
 # MUON OPTIMIZER 
@@ -289,7 +315,7 @@ CONTROL_TENSOR_NAME_PATTERNS = tuple(
     pattern
     for pattern in os.environ.get(
         "CONTROL_TENSOR_NAME_PATTERNS",
-        "attn_scale,attn_scales,mlp_scale,mlp_scales,resid_mix,resid_mixes,q_gain,skip_weight,skip_weights",
+        "attn_scale,attn_scales,mlp_scale,mlp_scales,resid_mix,resid_mixes,q_gain,skip_weight,skip_weights,smear_gate,smear_lambda",
     ).split(",")
     if pattern
 )
@@ -560,6 +586,7 @@ class CausalSelfAttention(nn.Module):
         num_kv_heads: int,
         rope_base: float,
         qk_gain_init: float,
+        partial_rope_fraction: float = 0.0,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -578,7 +605,16 @@ class CausalSelfAttention(nn.Module):
         self.proj = CastedLinear(dim, dim, bias=False)
         self.proj._zero_init = True
         self.q_gain = nn.Parameter(torch.full((num_heads,), qk_gain_init, dtype=torch.float32))
-        self.rotary = Rotary(self.head_dim, base=rope_base)
+        # Partial RoPE: only apply rotary to first N dims of head
+        self.partial_rope_fraction = partial_rope_fraction
+        if partial_rope_fraction > 0.0:
+            rope_dim = int(self.head_dim * partial_rope_fraction)
+            rope_dim = rope_dim + (rope_dim % 2)  # ensure even
+            self.rotary = Rotary(rope_dim, base=rope_base)
+            self.rope_dim = rope_dim
+        else:
+            self.rotary = Rotary(self.head_dim, base=rope_base)
+            self.rope_dim = self.head_dim
 
     def forward(self, x: Tensor) -> Tensor:
         bsz, seqlen, dim = x.shape
@@ -588,8 +624,15 @@ class CausalSelfAttention(nn.Module):
         q = F.rms_norm(q, (q.size(-1),))
         k = F.rms_norm(k, (k.size(-1),))
         cos, sin = self.rotary(seqlen, x.device, q.dtype)
-        q = apply_rotary_emb(q, cos, sin)
-        k = apply_rotary_emb(k, cos, sin)
+        if self.partial_rope_fraction > 0.0:
+            # Apply RoPE only to first rope_dim dimensions
+            q_rope = apply_rotary_emb(q[..., :self.rope_dim], cos, sin)
+            q = torch.cat([q_rope, q[..., self.rope_dim:]], dim=-1)
+            k_rope = apply_rotary_emb(k[..., :self.rope_dim], cos, sin)
+            k = torch.cat([k_rope, k[..., self.rope_dim:]], dim=-1)
+        else:
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
         q = q * self.q_gain.to(dtype=q.dtype)[None, :, None, None]
         y = F.scaled_dot_product_attention(
             q,
@@ -605,15 +648,20 @@ class CausalSelfAttention(nn.Module):
 
 class MLP(nn.Module):
     # relu^2 MLP from the original modded-nanogpt setup
-    def __init__(self, dim: int, mlp_mult: int):
+    def __init__(self, dim: int, mlp_mult: int, leaky_relu: bool = False, leaky_relu_slope: float = 0.01):
         super().__init__()
         hidden = mlp_mult * dim
         self.fc = CastedLinear(dim, hidden, bias=False)
         self.proj = CastedLinear(hidden, dim, bias=False)
         self.proj._zero_init = True
+        self.leaky_relu = leaky_relu
+        self.leaky_relu_slope = leaky_relu_slope
 
     def forward(self, x: Tensor) -> Tensor:
-        x = torch.relu(self.fc(x))
+        if self.leaky_relu:
+            x = F.leaky_relu(self.fc(x), negative_slope=self.leaky_relu_slope)
+        else:
+            x = torch.relu(self.fc(x))
         return self.proj(x.square())
 
 
@@ -626,12 +674,17 @@ class Block(nn.Module):
         mlp_mult: int,
         rope_base: float,
         qk_gain_init: float,
+        leaky_relu: bool = False,
+        leaky_relu_slope: float = 0.01,
+        parallel_residuals: bool = False,
+        partial_rope_fraction: float = 0.0,
     ):
         super().__init__()
+        self.parallel_residuals = parallel_residuals
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
-        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
-        self.mlp = MLP(dim, mlp_mult)
+        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init, partial_rope_fraction=partial_rope_fraction)
+        self.mlp = MLP(dim, mlp_mult, leaky_relu=leaky_relu, leaky_relu_slope=leaky_relu_slope)
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
@@ -639,11 +692,47 @@ class Block(nn.Module):
     def forward(self, x: Tensor, x0: Tensor) -> Tensor:
         mix = self.resid_mix.to(dtype=x.dtype)
         x = mix[0][None, None, :] * x + mix[1][None, None, :] * x0
-        attn_out = self.attn(self.attn_norm(x))
-        x = x + self.attn_scale.to(dtype=x.dtype)[None, None, :] * attn_out
-        x = x + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * self.mlp(self.mlp_norm(x))
+        if self.parallel_residuals:
+            attn_out = self.attn(self.attn_norm(x))
+            mlp_out = self.mlp(self.mlp_norm(x))
+            x = x + self.attn_scale.to(dtype=x.dtype)[None, None, :] * attn_out + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * mlp_out
+        else:
+            attn_out = self.attn(self.attn_norm(x))
+            x = x + self.attn_scale.to(dtype=x.dtype)[None, None, :] * attn_out
+            x = x + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * self.mlp(self.mlp_norm(x))
         return x
 
+
+# CaseOps: case type lookup constants
+_CASE_LOWER = 0
+_CASE_TITLE = 1
+_CASE_ALLCAPS = 2
+_CASE_MIXED = 3
+
+def _build_case_lookup(sp, vocab_size):
+    """Build a case-type lookup table from SentencePiece vocab."""
+    import numpy as np
+    case_np = np.zeros((vocab_size,), dtype=np.int64)
+    sp_size = int(sp.vocab_size())
+    for tid in range(min(sp_size, vocab_size)):
+        if sp.is_control(tid) or sp.is_unknown(tid) or sp.is_unused(tid) or sp.is_byte(tid):
+            continue
+        piece = sp.id_to_piece(tid)
+        text = piece.lstrip("▁")  # strip SentencePiece leading underscore
+        if not text:
+            continue
+        alpha = [c for c in text if c.isalpha()]
+        if not alpha:
+            continue
+        if all(c.isupper() for c in alpha) and len(alpha) >= 2:
+            case_np[tid] = _CASE_ALLCAPS
+        elif text[0].isupper() and (len(text) == 1 or text[1:].islower()):
+            case_np[tid] = _CASE_TITLE
+        elif all(c.islower() for c in alpha):
+            case_np[tid] = _CASE_LOWER
+        else:
+            case_np[tid] = _CASE_MIXED
+    return torch.from_numpy(case_np)
 
 class GPT(nn.Module):
     def __init__(
@@ -659,14 +748,39 @@ class GPT(nn.Module):
         logit_softcap: float,
         rope_base: float,
         qk_gain_init: float,
+        smear_gate_enabled: bool = True,
+        smear_gate_width: int = 12,
+        caseops_enabled: bool = False,
+        asymlogit_enabled: bool = False,
+        bigram_hash_enabled: bool = False,
+        bigram_hash_size: int = 4096,
+        gradient_checkpoint_enabled: bool = False,
+        ortho_init_enabled: bool = False,
+        partial_rope_fraction: float = 0.0,
+        leaky_relu_enabled: bool = False,
+        leaky_relu_slope: float = 0.01,
+        parallel_residuals_enabled: bool = False,
     ):
         super().__init__()
+        self.gradient_checkpoint_enabled = gradient_checkpoint_enabled
+        self.ortho_init_enabled = ortho_init_enabled
         if logit_softcap <= 0.0:
             raise ValueError(f"logit_softcap must be positive, got {logit_softcap}")
         self.tie_embeddings = tie_embeddings
         self.tied_embed_init_std = tied_embed_init_std
         self.logit_softcap = logit_softcap
+        self.caseops_enabled = caseops_enabled
+        self.asymlogit_enabled = asymlogit_enabled
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
+        # AsymLogit: separate pos/neg softcap scalars
+        if asymlogit_enabled:
+            self.softcap_pos = nn.Parameter(torch.tensor(logit_softcap))
+            self.softcap_neg = nn.Parameter(torch.tensor(logit_softcap))
+        # CaseOps: 4-case embedding (populated by init_caseops after model creation)
+        if caseops_enabled:
+            self.case_emb = nn.Embedding(4, model_dim)
+            nn.init.zeros_(self.case_emb.weight)
+            self.register_buffer("case_lookup", torch.zeros(vocab_size, dtype=torch.long), persistent=False)
         self.num_encoder_layers = num_layers // 2
         self.num_decoder_layers = num_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
@@ -680,6 +794,10 @@ class GPT(nn.Module):
                     mlp_mult,
                     rope_base,
                     qk_gain_init,
+                    leaky_relu=leaky_relu_enabled,
+                    leaky_relu_slope=leaky_relu_slope,
+                    parallel_residuals=parallel_residuals_enabled,
+                    partial_rope_fraction=partial_rope_fraction,
                 )
                 for i in range(num_layers)
             ]
@@ -688,6 +806,20 @@ class GPT(nn.Module):
         self.lm_head = None if tie_embeddings else CastedLinear(model_dim, vocab_size, bias=False)
         if self.lm_head is not None:
             self.lm_head._zero_init = True
+        # SmearGate: learned gate to blend each token with its left neighbor.
+        # W zero-init + lambda=0 -> transparent at step 0 (no-op until trained).
+        self.smear_gate_enabled = smear_gate_enabled
+        if self.smear_gate_enabled:
+            self.smear_width = smear_gate_width
+            self.smear_gate = CastedLinear(self.smear_width, 1, bias=False)
+            self.smear_gate._zero_init = True
+            self.smear_lambda = nn.Parameter(torch.zeros(1, dtype=torch.float32))
+        # BigramHash: learned embeddings for hashed adjacent-token pairs
+        self.bigram_hash_enabled = bigram_hash_enabled
+        if self.bigram_hash_enabled:
+            self.bigram_hash_size = bigram_hash_size
+            self.bigram_emb = nn.Embedding(bigram_hash_size, model_dim)
+            nn.init.zeros_(self.bigram_emb.weight)
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -696,21 +828,51 @@ class GPT(nn.Module):
         for module in self.modules():
             if isinstance(module, nn.Linear) and getattr(module, "_zero_init", False):
                 nn.init.zeros_(module.weight)
+        # OrthoInit: orthogonal initialization for non-zero-init weight matrices
+        if self.ortho_init_enabled:
+            for module in self.modules():
+                if isinstance(module, nn.Linear) and not getattr(module, "_zero_init", False):
+                    if module.weight.dim() >= 2:
+                        nn.init.orthogonal_(module.weight)
+
+    def init_caseops(self, sp, vocab_size, device):
+        """Initialize CaseOps case lookup from SentencePiece vocab. Call after model creation."""
+        case_types = _build_case_lookup(sp, vocab_size).to(device)
+        self.case_lookup.copy_(case_types)
 
     def forward(self, input_ids: Tensor, target_ids: Tensor) -> Tensor:
         x = self.tok_emb(input_ids)
+        if self.caseops_enabled:
+            x = x + self.case_emb(self.case_lookup[input_ids])
+        if self.bigram_hash_enabled:
+            # BigramHash: hash(prev_token, curr_token) -> embedding lookup
+            # Using multiplicative hash: (prev * 2654435761 + curr) % table_size
+            prev_ids = torch.cat([input_ids[:, :1], input_ids[:, :-1]], dim=1)
+            hash_idx = (prev_ids * 2654435761 + input_ids) % self.bigram_hash_size
+            x = x + self.bigram_emb(hash_idx)
+        if self.smear_gate_enabled:
+            # SmearGate: x_t = x_t + lambda * sigmoid(W @ x_t[:smear_width]) * x_{t-1}
+            sl = self.smear_lambda.to(dtype=x.dtype)
+            g = sl * torch.sigmoid(self.smear_gate(x[:, 1:, :self.smear_width]))
+            x = torch.cat([x[:, :1], x[:, 1:] + g * x[:, :-1]], dim=1)
         x = F.rms_norm(x, (x.size(-1),))
         x0 = x
         skips: list[Tensor] = []
 
         # First half stores skips; second half reuses them in reverse order.
         for i in range(self.num_encoder_layers):
-            x = self.blocks[i](x, x0)
+            if self.gradient_checkpoint_enabled and self.training:
+                x = grad_checkpoint(self.blocks[i], x, x0, use_reentrant=False)
+            else:
+                x = self.blocks[i](x, x0)
             skips.append(x)
         for i in range(self.num_decoder_layers):
             if skips:
                 x = x + self.skip_weights[i].to(dtype=x.dtype)[None, None, :] * skips.pop()
-            x = self.blocks[self.num_encoder_layers + i](x, x0)
+            if self.gradient_checkpoint_enabled and self.training:
+                x = grad_checkpoint(self.blocks[self.num_encoder_layers + i], x, x0, use_reentrant=False)
+            else:
+                x = self.blocks[self.num_encoder_layers + i](x, x0)
 
         x = self.final_norm(x).reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
@@ -720,7 +882,14 @@ class GPT(nn.Module):
             if self.lm_head is None:
                 raise RuntimeError("lm_head is required when tie_embeddings=False")
             logits_proj = self.lm_head(x)
-        logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        if self.asymlogit_enabled:
+            logits = torch.where(
+                logits_proj > 0,
+                self.softcap_pos * torch.tanh(logits_proj / self.softcap_pos),
+                self.softcap_neg * torch.tanh(logits_proj / self.softcap_neg),
+            )
+        else:
+            logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
         return F.cross_entropy(logits.float(), targets, reduction="mean")
 
 
@@ -733,7 +902,7 @@ def main() -> None:
 
     code = Path(__file__).read_text(encoding="utf-8")
     args = Hyperparameters()
-    zeropower_via_newtonschulz5 = torch.compile(zeropower_via_newtonschulz5)
+    # zeropower compile disabled for 2070
 
     # -----------------------------
     # DISTRIBUTED + CUDA SETUP
@@ -764,9 +933,9 @@ def main() -> None:
     from torch.backends.cuda import enable_cudnn_sdp, enable_flash_sdp, enable_math_sdp, enable_mem_efficient_sdp
 
     enable_cudnn_sdp(False)
-    enable_flash_sdp(True)
-    enable_mem_efficient_sdp(False)
-    enable_math_sdp(False)
+    enable_flash_sdp(False)
+    enable_mem_efficient_sdp(True)
+    enable_math_sdp(True)
 
     logfile = None
     if master_process:
@@ -835,13 +1004,35 @@ def main() -> None:
         logit_softcap=args.logit_softcap,
         rope_base=args.rope_base,
         qk_gain_init=args.qk_gain_init,
+        smear_gate_enabled=args.smear_gate_enabled,
+        smear_gate_width=args.smear_gate_width,
+        bigram_hash_enabled=args.bigram_hash_enabled,
+        bigram_hash_size=args.bigram_hash_size,
+        caseops_enabled=args.caseops_enabled,
+        asymlogit_enabled=args.asymlogit_enabled,
+        ortho_init_enabled=args.ortho_init_enabled,
+        partial_rope_fraction=args.partial_rope_fraction,
+        leaky_relu_enabled=args.leaky_relu_enabled,
+        leaky_relu_slope=args.leaky_relu_slope,
+        parallel_residuals_enabled=args.parallel_residuals_enabled,
     ).to(device).bfloat16()
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
             module.float()
     restore_low_dim_params_to_fp32(base_model)
-    compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
-    model: nn.Module = DDP(compiled_model, device_ids=[local_rank], broadcast_buffers=False) if distributed else compiled_model
+    if args.caseops_enabled:
+        base_model.init_caseops(sp, args.vocab_size, device)
+        log0(f"CaseOps: enabled (4-case embedding, +{4 * args.model_dim} params)")
+    if args.asymlogit_enabled:
+        log0(f"AsymLogit: enabled (pos/neg softcap, +2 params)")
+    compiled_model = base_model
+    model: nn.Module = DDP(compiled_model, device_ids=[local_rank], broadcast_buffers=False) if distributed else base_model
+
+    # EMA shadow weights
+    ema_shadow = None
+    if args.ema_enabled:
+        ema_shadow = {name: tensor.detach().clone() for name, tensor in base_model.state_dict().items()}
+        log0(f"EMA: enabled with decay={args.ema_decay}")
 
     # Optimizer split:
     # - token embedding (Adam) uses EMBED_LR
@@ -861,6 +1052,12 @@ def main() -> None:
     ]
     if base_model.skip_weights.numel() > 0:
         scalar_params.append(base_model.skip_weights)
+    if hasattr(base_model, 'bigram_emb'):
+        scalar_params.append(base_model.bigram_emb.weight)
+    if base_model.asymlogit_enabled:
+        scalar_params.extend([base_model.softcap_pos, base_model.softcap_neg])
+    if base_model.caseops_enabled:
+        scalar_params.extend(base_model.case_emb.parameters())
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
     optimizer_tok = torch.optim.Adam(
         [{"params": [base_model.tok_emb.weight], "lr": token_lr, "base_lr": token_lr}],
@@ -895,7 +1092,8 @@ def main() -> None:
     n_params = sum(p.numel() for p in base_model.parameters())
     log0(f"model_params:{n_params}")
     log0(f"world_size:{world_size} grad_accum_steps:{grad_accum_steps}")
-    log0("sdp_backends:cudnn=False flash=True mem_efficient=False math=False")
+    from torch.backends.cuda import flash_sdp_enabled, mem_efficient_sdp_enabled, math_sdp_enabled
+    log0(f"sdp_backends:flash={flash_sdp_enabled()} mem_efficient={mem_efficient_sdp_enabled()} math={math_sdp_enabled()}")
     log0(f"attention_mode:gqa num_heads:{args.num_heads} num_kv_heads:{args.num_kv_heads}")
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
@@ -973,7 +1171,7 @@ def main() -> None:
     while True:
         last_step = step == args.iterations or (stop_after_step is not None and step >= stop_after_step)
 
-        should_validate = last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)
+        should_validate = last_step and args.val_loss_every > 0  # skip final val when VAL_LOSS_EVERY=0
         if should_validate:
             torch.cuda.synchronize()
             training_time_ms += 1000.0 * (time.perf_counter() - t0)
@@ -1031,6 +1229,14 @@ def main() -> None:
             torch.nn.utils.clip_grad_norm_(base_model.parameters(), args.grad_clip_norm)
         for opt in optimizers:
             opt.step()
+
+        # EMA weight update
+        if ema_shadow is not None:
+            decay = args.ema_decay
+            with torch.no_grad():
+                for name, param in base_model.state_dict().items():
+                    ema_shadow[name].mul_(decay).add_(param, alpha=1.0 - decay)
+
         zero_grad_all()
 
         step += 1
@@ -1065,6 +1271,11 @@ def main() -> None:
     # Save the raw state (useful for debugging/loading in PyTorch directly), then always produce
     # the compressed int8+zlib artifact and validate the round-tripped weights.
 
+    # Swap to EMA weights for final model
+    if ema_shadow is not None:
+        log0("EMA: swapping to averaged weights for final model")
+        base_model.load_state_dict(ema_shadow)
+
     if master_process:
         torch.save(base_model.state_dict(), "final_model.pt")
         model_bytes = os.path.getsize("final_model.pt")
@@ -1091,33 +1302,34 @@ def main() -> None:
         )
         log0(f"Total submission size int8+zlib: {quant_file_bytes + code_bytes} bytes")
 
-    if distributed:
-        dist.barrier()
-    with open("final_model.int8.ptz", "rb") as f:
-        quant_blob_disk = f.read()
-    quant_state = torch.load(io.BytesIO(zlib.decompress(quant_blob_disk)), map_location="cpu")
-    base_model.load_state_dict(dequantize_state_dict_int8(quant_state), strict=True)
-    torch.cuda.synchronize()
-    t_qeval = time.perf_counter()
-    q_val_loss, q_val_bpb = eval_val(
-        args,
-        model,
-        rank,
-        world_size,
-        device,
-        grad_accum_steps,
-        val_tokens,
-        base_bytes_lut,
-        has_leading_space_lut,
-        is_boundary_token_lut,
-    )
-    torch.cuda.synchronize()
-    log0(
-        f"final_int8_zlib_roundtrip val_loss:{q_val_loss:.4f} val_bpb:{q_val_bpb:.4f} "
-        f"eval_time:{1000.0 * (time.perf_counter() - t_qeval):.0f}ms"
-    )
-    log0(f"final_int8_zlib_roundtrip_exact val_loss:{q_val_loss:.8f} val_bpb:{q_val_bpb:.8f}")
-
+    if args.val_loss_every > 0:
+        if distributed:
+            dist.barrier()
+        with open("final_model.int8.ptz", "rb") as f:
+            quant_blob_disk = f.read()
+        quant_state = torch.load(io.BytesIO(zlib.decompress(quant_blob_disk)), map_location="cpu")
+        base_model.load_state_dict(dequantize_state_dict_int8(quant_state), strict=True)
+        torch.cuda.synchronize()
+        t_qeval = time.perf_counter()
+        q_val_loss, q_val_bpb = eval_val(
+            args,
+            model,
+            rank,
+            world_size,
+            device,
+            grad_accum_steps,
+            val_tokens,
+            base_bytes_lut,
+            has_leading_space_lut,
+            is_boundary_token_lut,
+        )
+        torch.cuda.synchronize()
+        log0(
+            f"final_int8_zlib_roundtrip val_loss:{q_val_loss:.4f} val_bpb:{q_val_bpb:.4f} "
+            f"eval_time:{1000.0 * (time.perf_counter() - t_qeval):.0f}ms"
+        )
+        log0(f"final_int8_zlib_roundtrip_exact val_loss:{q_val_loss:.8f} val_bpb:{q_val_bpb:.8f}")
+    
     if distributed:
         dist.destroy_process_group()
 
