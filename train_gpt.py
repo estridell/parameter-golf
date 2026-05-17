@@ -2,6 +2,7 @@ import base64, collections, copy, fcntl, glob, io, lzma, math, os
 from pathlib import Path
 import random, re, subprocess, sys, time, uuid, numpy as np, sentencepiece as spm, torch, torch.distributed as dist, torch.nn.functional as F
 from torch import Tensor, nn
+from torch.utils.checkpoint import checkpoint as grad_checkpoint
 # RTX 2070 patch: FlashAttention 3 not supported on sm_75
 try:
     from flash_attn_interface import (
@@ -295,6 +296,7 @@ class Hyperparameters:
     muon_wd = float(os.environ.get("MUON_WD", 0.095))
     embed_wd = float(os.environ.get("EMBED_WD", 0.085))
     ema_decay = float(os.environ.get("EMA_DECAY", 0.9965))
+    gradient_checkpoint_enabled = bool(int(os.environ.get("GRADIENT_CHECKPOINT_ENABLED", "0")))
     ttt_enabled = bool(int(os.environ.get("TTT_ENABLED", "1")))
     ttt_lora_rank = int(os.environ.get("TTT_LORA_RANK", 96))
     ttt_lora_lr = float(os.environ.get("TTT_LORA_LR", 0.0001))
@@ -1121,6 +1123,7 @@ class Block(nn.Module):
         sparse_attn_gate_scale=1.0,
     ):
         super().__init__()
+        self.use_checkpoint = False  # set by GPT.__init__
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
         self.attn = CausalSelfAttention(
@@ -1369,7 +1372,10 @@ class GPT(nn.Module):
         )
         for i in enc_iter:
             q_w, k_w, v_w, out_w, up_w, down_w = self._bank_weights(i)
-            x = self.blocks[i](x, x0, q_w, k_w, v_w, out_w, up_w, down_w, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+            if getattr(self.blocks[i], "use_checkpoint", False) and self.blocks[i].training:
+                x = grad_checkpoint(self.blocks[i], x, x0, q_w, k_w, v_w, out_w, up_w, down_w, cu_seqlens, max_seqlen, use_reentrant=False)
+            else:
+                x = self.blocks[i](x, x0, q_w, k_w, v_w, out_w, up_w, down_w, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
             skips.append(x)
         psl = self.parallel_start_layer
         lane0 = None
@@ -1403,7 +1409,10 @@ class GPT(nn.Module):
                         x = torch.lerp(scaled_skip, x, g)
                     else:
                         x = x + scaled_skip
-                x = self.blocks[i](x, x0, q_w, k_w, v_w, out_w, up_w, down_w, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
+                if getattr(self.blocks[i], "use_checkpoint", False) and self.blocks[i].training:
+                    x = grad_checkpoint(self.blocks[i], x, x0, q_w, k_w, v_w, out_w, up_w, down_w, cu_seqlens, max_seqlen, use_reentrant=False)
+                else:
+                    x = self.blocks[i](x, x0, q_w, k_w, v_w, out_w, up_w, down_w, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         if lane0 is not None:
             x = self._final_parallel_hidden(lane0, lane1)
         x = self.final_norm(x)
