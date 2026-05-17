@@ -44,7 +44,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** CRITICAL — determines whether EMA is actually the problem
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -62,7 +62,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — cheap experiment, potentially big gain
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -85,7 +85,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — gives us our first real BPB number
 **Deps:** #2 (use best QK-Gain)
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -103,7 +103,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** MEDIUM — could be a free improvement
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -121,7 +121,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** MEDIUM — could unlock wider MLPs on 9L
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -141,7 +141,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** MEDIUM — standard technique, easy to test
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -159,7 +159,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** MEDIUM — might squeeze a few more %
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -181,7 +181,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — 4x faster experiments if fixed
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -199,7 +199,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — free BPB improvement if confirmed
 **Deps:** #3 (need same config for fair comparison)
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -219,7 +219,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — most correlated technique with top scores
 **Deps:** None
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -237,7 +237,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — more depth for free
 **Deps:** Needs QAT for quantization-safe submission
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -258,7 +258,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGHEST — required for competitive BPB
 **Deps:** Data pipeline change. Do this when ready for a major config shift.
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -276,7 +276,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** HIGH — free BPB at eval time
 **Deps:** LoRA implementation needed
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -294,7 +294,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Impact:** LOW — incremental at best
 **Deps:** BigramHash (already done)
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -307,7 +307,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Expected runtime:** 30 min
 **Impact:** LOW — artifact size optimization
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -318,7 +318,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Expected runtime:** 2 hr
 **Impact:** LOW — intel only
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -329,7 +329,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Expected runtime:** 3-4 hr
 **Impact:** MEDIUM — better artifact quality
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
@@ -340,7 +340,7 @@ If you finish the queue before your deadline, pick the next unpicked item from `
 **Expected runtime:** 1 hr
 **Impact:** LOW
 
-- [ ] Not started
+- [x] DONE: QK-Gain has negligible impact (0.66% spread). gain=2.5 best (3.4519), gain=5.25 worst (3.4745). Use default 1.5. See research/qk-gain-sweep.md
 
 ---
 
