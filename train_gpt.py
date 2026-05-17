@@ -12,9 +12,14 @@ except ImportError:
     flash_attn_3_func = None
     flash_attn_varlen_func = None
 from concurrent.futures import ThreadPoolExecutor
-import triton
-import triton.language as tl
-from triton.tools.tensor_descriptor import TensorDescriptor
+# RTX 2070 patch: Triton import with fallback
+try:
+    import triton
+    import triton.language as tl
+    from triton.tools.tensor_descriptor import TensorDescriptor
+    _TRITON_AVAILABLE = True
+except Exception:
+    _TRITON_AVAILABLE = False
 
 
 # ===== Fused softcapped cross-entropy (Triton) — training-only path =====
@@ -26,8 +31,8 @@ from triton.tools.tensor_descriptor import TensorDescriptor
 # backward kernel mirrors the forward so there's no stored softcapped logits.
 # Numerically identical to the eager path up to fp32 accumulation differences.
 _FUSED_CE_LIBRARY = "pgsubmission1draft7fusedce"
-_FUSED_CE_BLOCK_SIZE = 1024
-_FUSED_CE_NUM_WARPS = 4
+_FUSED_CE_BLOCK_SIZE = 256  # RTX 2070 patch: fit 64KB shmem
+_FUSED_CE_NUM_WARPS = 2  # RTX 2070 patch: fewer warps
 
 
 @triton.jit
@@ -837,8 +842,8 @@ def linear_leaky_relu_square(a, b, aux=None):
     if aux is None:
         aux = torch.empty((M, N), device=a.device, dtype=a.dtype)
     num_sms = torch.cuda.get_device_properties(a.device).multi_processor_count
-    BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 256, 128, 64
-    num_stages = 4 if forward else 3
+    BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 64, 64, 64  # RTX 2070 patch
+    num_stages = 2  # RTX 2070 patch
     a_desc = TensorDescriptor.from_tensor(a, [BLOCK_SIZE_M, BLOCK_SIZE_K])
     b_desc = TensorDescriptor.from_tensor(b, [BLOCK_SIZE_N, BLOCK_SIZE_K])
     c_desc = TensorDescriptor.from_tensor(c, [BLOCK_SIZE_M, BLOCK_SIZE_N // 2])
@@ -860,7 +865,7 @@ def linear_leaky_relu_square(a, b, aux=None):
         NUM_SMS=num_sms,
         FORWARD=forward,
         num_stages=num_stages,
-        num_warps=8,
+        num_warps=4,  # RTX 2070 patch
     )
     if forward:
         return c, aux
@@ -1029,21 +1034,25 @@ class CausalSelfAttention(nn.Module):
         k = apply_rotary_emb(k, cos, sin, self.rope_dims)
         q = q * self.q_gain.to(dtype=q.dtype)[None, None, :, None]
         if cu_seqlens is not None:
-            # RTX 2070 patch: SDP fallback for varlen
-            y = F.scaled_dot_product_attention(
-                q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-                is_causal=True
-            ).transpose(1, 2)
+            # RTX 2070 patch: SDP fallback for varlen with GQA
+            q_t = q.transpose(1, 2)
+            k_t = k.transpose(1, 2)
+            v_t = v.transpose(1, 2)
+            if k_t.size(1) < q_t.size(1):
+                reps = q_t.size(1) // k_t.size(1)
+                k_t = k_t.repeat_interleave(reps, dim=1)
+                v_t = v_t.repeat_interleave(reps, dim=1)
+            y = F.scaled_dot_product_attention(q_t, k_t, v_t, is_causal=True).transpose(1, 2)
         else:
-            # RTX 2070 patch: SDP fallback
-
-            y = F.scaled_dot_product_attention(
-
-                q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-
-                is_causal=True
-
-            ).transpose(1, 2)
+            # RTX 2070 patch: SDP fallback with GQA
+            q_t = q.transpose(1, 2)
+            k_t = k.transpose(1, 2)
+            v_t = v.transpose(1, 2)
+            if k_t.size(1) < q_t.size(1):
+                reps = q_t.size(1) // k_t.size(1)
+                k_t = k_t.repeat_interleave(reps, dim=1)
+                v_t = v_t.repeat_interleave(reps, dim=1)
+            y = F.scaled_dot_product_attention(q_t, k_t, v_t, is_causal=True).transpose(1, 2)
         if self.use_xsa:
             y = self._xsa_efficient(y, v)
         # AttnOutGate inlined (PR #1667). Inline + .contiguous() barrier so torch.compile
@@ -1079,7 +1088,7 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, dim, mlp_mult):
         super().__init__()
-        self.use_fused = True
+        self.use_fused = False  # RTX 2070 patch
 
     def forward(self, x, up_w, down_w):
         if self.training and self.use_fused:
@@ -1535,15 +1544,15 @@ class GPT(nn.Module):
         q = apply_rotary_emb(q, cos, sin, attn.rope_dims)
         k = apply_rotary_emb(k, cos, sin, attn.rope_dims)
         q = q * attn.q_gain.to(dtype=q.dtype)[None, None, :, None]
-        # RTX 2070 patch: SDP fallback
-
-        y = F.scaled_dot_product_attention(
-
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-
-            is_causal=True
-
-        ).transpose(1, 2)
+        # RTX 2070 patch: SDP fallback with GQA
+        q_t = q.transpose(1, 2)
+        k_t = k.transpose(1, 2)
+        v_t = v.transpose(1, 2)
+        if k_t.size(1) < q_t.size(1):
+            reps = q_t.size(1) // k_t.size(1)
+            k_t = k_t.repeat_interleave(reps, dim=1)
+            v_t = v_t.repeat_interleave(reps, dim=1)
+        y = F.scaled_dot_product_attention(q_t, k_t, v_t, is_causal=True).transpose(1, 2)
         if attn.use_xsa:
             y = attn._xsa_efficient(y, v)
         # AttnOutGate (TTT path) — inline + .contiguous() barrier, same as the eval path.
@@ -1605,15 +1614,15 @@ class GPT(nn.Module):
         q = apply_rotary_emb(q, cos, sin, attn.rope_dims)
         k = apply_rotary_emb(k, cos, sin, attn.rope_dims)
         q = q * attn.q_gain.to(dtype=q.dtype)[None, None, :, None]
-        # RTX 2070 patch: SDP fallback
-
-        y = F.scaled_dot_product_attention(
-
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-
-            is_causal=True
-
-        ).transpose(1, 2)
+        # RTX 2070 patch: SDP fallback with GQA
+        q_t = q.transpose(1, 2)
+        k_t = k.transpose(1, 2)
+        v_t = v.transpose(1, 2)
+        if k_t.size(1) < q_t.size(1):
+            reps = q_t.size(1) // k_t.size(1)
+            k_t = k_t.repeat_interleave(reps, dim=1)
+            v_t = v_t.repeat_interleave(reps, dim=1)
+        y = F.scaled_dot_product_attention(q_t, k_t, v_t, is_causal=True).transpose(1, 2)
         if attn.use_xsa:
             y = attn._xsa_efficient(y, v)
         # AttnOutGate (TTT parallel path) — inline + .contiguous() barrier.
@@ -3616,7 +3625,7 @@ def train_and_eval(h, device):
     if h.num_loops > 0:
         eval_model.looping_active = True
     if not ttt_eval_only:
-        compiled_model = eval_model  # RTX 2070 patch
+        compiled_model = base_model  # RTX 2070 patch
         compiled_forward_logits = lambda *a, **kw: compiled_model(*a, **kw)  # RTX 2070 patch
         timed_eval(
             "diagnostic quantized",
@@ -3740,10 +3749,9 @@ def main():
     )
 
     enable_cudnn_sdp(False)
-    # RTX 2070 patch: flash not supported on sm_75
-    enable_flash_sdp(False)
-    enable_mem_efficient_sdp(True)
-    enable_math_sdp(True)
+    enable_flash_sdp(False)  # RTX 2070 patch
+    enable_mem_efficient_sdp(True)  # RTX 2070 patch
+    enable_math_sdp(True)  # RTX 2070 patch
     torch._dynamo.config.optimize_ddp = False
     torch._dynamo.config.cache_size_limit = 64
     h = Hyperparameters()
