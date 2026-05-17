@@ -1,0 +1,33 @@
+=== FAST TECHNIQUE TESTS (50 steps) ===
+Started: Sun May 17 03:16:55 CEST 2026
+
+--- BASELINE ---
+Start: Sun May 17 03:16:55 CEST 2026
+logs/9bc0801c-60e1-47d8-b021-e135e48fc690.txt
+val_bpb:enabled tokenizer_kind=sentencepiece tokenizer_path=./data/tokenizers/fineweb_1024_bpe.model
+train_loader:dataset:fineweb10B_sp1024 train_shards:10
+val_loader:shards pattern=./data/datasets/fineweb10B_sp1024/fineweb_val_*.bin tokens:62021632
+model_params:17059912
+world_size:1 grad_accum_steps:8
+sdp_backends:flash=False mem_efficient=True math=True
+attention_mode:gqa num_heads:8 num_kv_heads:4
+tie_embeddings:True embed_lr:0.05 head_lr:0.0 matrix_lr:0.04 scalar_lr:0.04
+train_batch_tokens:65536 train_seq_len:1024 iterations:50 warmup_steps:3 max_wallclock_seconds:300.000
+seed:42
+warmup_step:1/3
+warmup_step:2/3
+warmup_step:3/3
+step:1/50 train_loss:6.9366 train_time:3693ms step_avg:3693.34ms
+step:2/50 train_loss:17.3582 train_time:7454ms step_avg:3727.21ms
+step:3/50 train_loss:16.5693 train_time:11245ms step_avg:3748.25ms
+step:4/50 train_loss:15.6406 train_time:15016ms step_avg:3753.97ms
+step:5/50 train_loss:14.7866 train_time:18781ms step_avg:3756.26ms
+step:6/50 train_loss:13.7370 train_time:22534ms step_avg:3755.69ms
+step:7/50 train_loss:12.8084 train_time:26280ms step_avg:3754.22ms
+step:8/50 train_loss:11.9207 train_time:30032ms step_avg:3753.99ms
+step:9/50 train_loss:11.0951 train_time:33773ms step_avg:3752.54ms
+step:10/50 train_loss:10.1997 train_time:37501ms step_avg:3750.12ms
+step:20/50 train_loss:6.1209 train_time:74901ms step_avg:3745.06ms
+step:30/50 train_loss:5.6869 train_time:112361ms step_avg:3745.38ms
+step:40/50 train_loss:5.5452 train_time:149806ms step_avg:3745.15ms
+step:50/50 train_loss:5.4824 train_time:187125ms step_avg:3742.50ms

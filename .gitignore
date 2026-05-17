@@ -13,3 +13,7 @@ logs/*.pt
 logs/
 .claude/settings.local.json
 STRATEGY.md
+SETUP.md
+*.pt
+logs/
+data/

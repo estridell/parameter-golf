@@ -1,0 +1,1 @@
+Terminated                 python3 -u train_gpt.py >> "$RESULTS" 2>&1
