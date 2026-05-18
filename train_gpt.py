@@ -3553,7 +3553,7 @@ def train_model(h, device, val_data):
             and step >= stop_after_step
         )
         should_validate = (
-            last_step or h.val_loss_every > 0 and step % h.val_loss_every == 0
+            h.val_loss_every > 0 and (last_step or step % h.val_loss_every == 0)
         )
         if should_validate:
             torch.cuda.synchronize()
@@ -3645,15 +3645,16 @@ def train_and_eval(h, device):
             h, device, val_data
         )
         torch._dynamo.reset()
-        timed_eval(
-            "diagnostic pre-quantization post-ema",
-            eval_val,
-            h,
-            device,
-            val_data,
-            compiled_model,
-            compiled_forward_logits,
-        )
+        if os.environ.get("PREQUANT_ONLY", "0") != "1":
+            timed_eval(
+                "diagnostic pre-quantization post-ema",
+                eval_val,
+                h,
+                device,
+                val_data,
+                compiled_model,
+                compiled_forward_logits,
+            )
         if os.environ.get("PREQUANT_ONLY", "0") == "1":
             log("PREQUANT_ONLY=1 — skipping serialize/GPTQ/post-quant eval/TTT")
             return
