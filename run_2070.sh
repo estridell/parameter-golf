@@ -15,8 +15,11 @@ export MAX_WALLCLOCK_SECONDS=$WALLCLOCK
 export WARMUP_STEPS=0
 export DATA_PATH=./data/datasets/fineweb10B_sp1024
 export TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model
-export TRAIN_BATCH_TOKENS=65536
+export TRAIN_BATCH_TOKENS=16384
 export VAL_LOSS_EVERY=0
+export VOCAB_SIZE=1024
+export GRADIENT_CHECKPOINT_ENABLED=1
+export NUM_LOOPS=0
 
-echo "[rtx2070] seed=$SEED wallclock=${WALLCLOCK}s batch=65536 expandable_segments warmup=0"
+echo "[rtx2070] seed=$SEED wallclock=${WALLCLOCK}s batch=16384 expandable_segments grad_ckpt warmup=0"
 python3 -u train_gpt.py

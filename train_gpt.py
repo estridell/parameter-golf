@@ -249,7 +249,7 @@ class Hyperparameters:
     train_seq_len = int(os.environ.get("TRAIN_SEQ_LEN", 2048))
     train_log_every = int(os.environ.get("TRAIN_LOG_EVERY", 500))
     max_wallclock_seconds = float(os.environ.get("MAX_WALLCLOCK_SECONDS", 6e2))
-    val_batch_tokens = int(os.environ.get("VAL_BATCH_TOKENS", 524288))
+    val_batch_tokens = int(os.environ.get("VAL_BATCH_TOKENS", 65536))
     eval_seq_len = int(os.environ.get("EVAL_SEQ_LEN", 2048))
     val_loss_every = int(os.environ.get("VAL_LOSS_EVERY", 4000))
     vocab_size = int(os.environ.get("VOCAB_SIZE", 8192))
@@ -1030,7 +1030,7 @@ class CausalSelfAttention(nn.Module):
         k = apply_rotary_emb(k, cos, sin, self.rope_dims)
         q = q * self.q_gain.to(dtype=q.dtype)[None, None, :, None]
         if cu_seqlens is not None:
-            # RTX 2070 patch: SDP fallback for varlen with GQA
+            # RTX 2070 patch: per-document SDPA for packed sequences (no FlashAttention on sm_75)
             q_t = q.transpose(1, 2)
             k_t = k.transpose(1, 2)
             v_t = v.transpose(1, 2)
@@ -1038,7 +1038,42 @@ class CausalSelfAttention(nn.Module):
                 reps = q_t.size(1) // k_t.size(1)
                 k_t = k_t.repeat_interleave(reps, dim=1)
                 v_t = v_t.repeat_interleave(reps, dim=1)
-            y = F.scaled_dot_product_attention(q_t, k_t, v_t, is_causal=True).transpose(1, 2)
+            total_len = q_t.size(2)
+            # Extract document boundaries from cu_seqlens
+            boundaries = []
+            for ci in range(cu_seqlens.size(0)):
+                val = int(cu_seqlens[ci])
+                if val > total_len:
+                    boundaries.append(total_len)
+                    break
+                boundaries.append(val)
+                if val >= total_len:
+                    break
+            n_seg = len(boundaries) - 1
+            if n_seg <= 1:
+                # Single document or no boundaries — plain causal SDPA
+                y = F.scaled_dot_product_attention(q_t, k_t, v_t, is_causal=True).transpose(1, 2)
+            elif total_len <= 4096:
+                # Small sequence — use block-diagonal causal mask (single SDPA call)
+                seg_id = torch.zeros(total_len, dtype=torch.int64, device=q_t.device)
+                for si in range(n_seg):
+                    seg_id[boundaries[si]:boundaries[si + 1]] = si
+                same_doc = seg_id.unsqueeze(0) == seg_id.unsqueeze(1)
+                causal = torch.tril(torch.ones(total_len, total_len, dtype=torch.bool, device=q_t.device))
+                attn_mask = same_doc & causal
+                y = F.scaled_dot_product_attention(q_t, k_t, v_t, attn_mask=attn_mask).transpose(1, 2)
+            else:
+                # Large sequence — per-document loop (memory-efficient)
+                seg_outs = []
+                for si in range(n_seg):
+                    s, e = boundaries[si], boundaries[si + 1]
+                    seg_outs.append(
+                        F.scaled_dot_product_attention(
+                            q_t[:, :, s:e, :], k_t[:, :, s:e, :], v_t[:, :, s:e, :],
+                            is_causal=True,
+                        )
+                    )
+                y = torch.cat(seg_outs, dim=2).transpose(1, 2)
         else:
             # RTX 2070 patch: SDP fallback with GQA
             q_t = q.transpose(1, 2)
@@ -2818,10 +2853,11 @@ def eval_val(h, device, val_data, model, forward_logits_fn=None):
             val_token_count += float(y.numel())
             prev_ids = x
             tgt_ids = y
-            sidecar_slice = val_data.val_bytes[raw_start + 1 : raw_end].to(
+            if val_data.val_bytes is not None:
+                sidecar_slice = val_data.val_bytes[raw_start + 1 : raw_end].to(
                 device=device, dtype=torch.int32, non_blocking=True
-            )
-            val_byte_count += sidecar_slice.to(torch.float64).sum()
+                )
+                val_byte_count += sidecar_slice.to(torch.float64).sum()
     if dist.is_available() and dist.is_initialized():
         dist.all_reduce(val_loss_sum, op=dist.ReduceOp.SUM)
         dist.all_reduce(val_token_count, op=dist.ReduceOp.SUM)
