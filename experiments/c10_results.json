@@ -1,0 +1,12 @@
+{
+  "experiment": "C10_AWQ_Lite",
+  "baseline_loss": 4.315696597099304,
+  "quantized_loss": 8.678263485431671,
+  "accuracy_loss": 4.362566888332367,
+  "original_bytes": 129086056,
+  "quantized_bytes": 32534836,
+  "compression_ratio": 3.967625839577,
+  "protected_channels_pct": 0.9765625,
+  "n_calibration_batches": 32,
+  "time_seconds": 44.785189151763916
+}
