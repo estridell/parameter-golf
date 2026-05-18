@@ -393,16 +393,10 @@ class Hyperparameters:
     _default_caseops_data = os.path.join(
         data_dir,
         "datasets",
-        "fineweb10B_sp8192_caseops",
-        "datasets",
-        "datasets",
         "fineweb10B_sp8192_lossless_caps_caseops_v1_reserved",
     )
     _default_caseops_tok = os.path.join(
         data_dir,
-        "datasets",
-        "fineweb10B_sp8192_caseops",
-        "datasets",
         "tokenizers",
         "fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model",
     )
@@ -3373,7 +3367,7 @@ def train_model(h, device, val_data):
     base_model = GPT(h).to(device).bfloat16()
     restore_fp32_params(base_model)
     compiled_model = base_model  # RTX 2070 patch
-    compiled_forward_logits = lambda *a, **kw: compiled_model(*a, **kw)  # RTX 2070 patch
+    compiled_forward_logits = lambda *a, **kw: compiled_model.forward_logits(*a, **kw)  # RTX 2070 patch
     model = compiled_model
     log(f"model_params:{sum(p.numel()for p in base_model.parameters())}")
     optimizers = Optimizers(h, base_model)
@@ -3635,7 +3629,7 @@ def train_and_eval(h, device):
         eval_model.looping_active = True
     if not ttt_eval_only:
         compiled_model = base_model  # RTX 2070 patch
-        compiled_forward_logits = lambda *a, **kw: compiled_model(*a, **kw)  # RTX 2070 patch
+        compiled_forward_logits = lambda *a, **kw: compiled_model.forward_logits(*a, **kw)  # RTX 2070 patch
         timed_eval(
             "diagnostic quantized",
             eval_val,
