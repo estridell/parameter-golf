@@ -432,6 +432,13 @@ class Hyperparameters:
         else "final_model.int6.ptz"
     )
 
+    # CHECKPOINT_NAME: save to checkpoints/<name>.pt instead of default
+    checkpoint_name = os.environ.get("CHECKPOINT_NAME", None)
+    if checkpoint_name:
+        os.makedirs("checkpoints", exist_ok=True)
+        model_path = f"checkpoints/{checkpoint_name}.pt"
+        quantized_model_path = f"checkpoints/{checkpoint_name}.int6.ptz"
+
 
 _logger_hparams = None
 
@@ -473,10 +480,21 @@ class ValidationData:
                 self.is_boundary_token_lut,
             ) = build_sentencepiece_luts(self.sp, h.vocab_size, device)
         self.val_bytes = None
-        if self.caseops_enabled:
+        import glob as _glob
+        if _glob.glob(h.val_bytes_files):
             self.val_bytes = load_validation_byte_sidecar(
                 h.val_bytes_files, h.eval_seq_len, self.val_tokens.numel()
             )
+        else:
+            # Fallback: compute per-token byte counts from SentencePiece vocab
+            log("No byte sidecar files found; computing byte counts from tokenizer vocab")
+            piece_bytes = []
+            for tid in range(h.vocab_size):
+                piece = self.sp.id_to_piece(tid)
+                raw = piece.replace("▁", " ").encode("utf-8")
+                piece_bytes.append(max(len(raw), 1))
+            byte_lut = torch.tensor(piece_bytes, dtype=torch.int32)
+            self.val_bytes = byte_lut[self.val_tokens.to(torch.int64)]
 
 
 def build_sentencepiece_luts(sp, vocab_size, device):
@@ -2795,13 +2813,19 @@ def deserialize(h, device):
 
 def _loss_bpb(loss_sum, token_count, byte_count):
     val_loss = (loss_sum / token_count).item()
-    val_bpb = val_loss / math.log(2.0) * (token_count.item() / byte_count.item())
+    if byte_count.item() > 0:
+        val_bpb = val_loss / math.log(2.0) * (token_count.item() / byte_count.item())
+    else:
+        # Fallback: approximate BPB as val_loss / ln(2)
+        # This assumes avg bytes/token ≈ 1, which underestimates true BPB
+        val_bpb = val_loss / math.log(2.0)
     return val_loss, val_bpb
 
 
 def eval_val(h, device, val_data, model, forward_logits_fn=None):
     seq_len = h.eval_seq_len
     local_batch_tokens = h.val_batch_tokens // (h.world_size * h.grad_accum_steps)
+    val_max_batches = int(os.environ.get("VAL_MAX_BATCHES", "0"))
     if local_batch_tokens < seq_len:
         raise ValueError(
             f"VAL_BATCH_SIZE must provide at least one sequence per rank; got VAL_BATCH_SIZE={h.val_batch_tokens}, WORLD_SIZE={h.world_size}, GRAD_ACCUM_STEPS={h.grad_accum_steps}, seq_len={seq_len}"
@@ -2826,8 +2850,12 @@ def eval_val(h, device, val_data, model, forward_logits_fn=None):
     global BOS_ID
     if BOS_ID is None:
         BOS_ID = 1
+    val_batch_count = 0
     with torch.no_grad():
         for batch_seq_start in range(seq_start, seq_end, local_batch_seqs):
+            val_batch_count += 1
+            if val_max_batches > 0 and val_batch_count > val_max_batches:
+                break
             batch_seq_end = min(batch_seq_start + local_batch_seqs, seq_end)
             raw_start = batch_seq_start * seq_len
             raw_end = batch_seq_end * seq_len + 1
@@ -3553,7 +3581,7 @@ def train_model(h, device, val_data):
             and step >= stop_after_step
         )
         should_validate = (
-            h.val_loss_every > 0 and (last_step or step % h.val_loss_every == 0)
+            h.val_loss_every > 0 and step > 0 and (last_step or step % h.val_loss_every == 0)
         )
         if should_validate:
             torch.cuda.synchronize()
