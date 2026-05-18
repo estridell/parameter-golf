@@ -1,0 +1,16 @@
+{
+  "experiment": "C11_GPTQ_SelfGen",
+  "baseline_loss": 4.315696597099304,
+  "quantized_loss": 4.2843557596206665,
+  "accuracy_loss": -0.031340837478637695,
+  "original_bytes": 129086056,
+  "quantized_bytes": 24461620,
+  "compression_ratio": 5.277085327954567,
+  "n_calibration_batches": 32,
+  "tensor_categories": {
+    "gptq_int6": 66,
+    "passthrough": 48,
+    "gptq_int8": 1
+  },
+  "time_seconds": 53.97677445411682
+}
