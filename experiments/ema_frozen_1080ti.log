@@ -1,0 +1,212 @@
+Hyperparameters:
+  adam_eps: 1e-08
+  adam_wd: 0.02
+  artifact_dir: 
+  attn_clip_sigmas: 13.0
+  attn_out_gate_enabled: False
+  attn_out_gate_src: proj
+  beta1: 0.9
+  beta2: 0.95
+  caseops_enabled: True
+  compressor: brotli
+  data_dir: ./data/
+  datasets_dir: ./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved
+  distributed: False
+  ema_decay: 1.0
+  embed_bits: 8
+  embed_clip_sigmas: 20.0
+  embed_lr: 0.6
+  embed_wd: 0.085
+  enable_looping_at: 0.35
+  eval_seq_len: 2048
+  eval_stride: 64
+  fused_ce_enabled: False
+  gate_window: 12
+  gated_attn_enabled: False
+  gated_attn_init_std: 0.01
+  gated_attn_quant_gate: False
+  global_ttt_batch_seqs: 32
+  global_ttt_chunk_tokens: 32768
+  global_ttt_epochs: 1
+  global_ttt_grad_clip: 1.0
+  global_ttt_lr: 0.001
+  global_ttt_momentum: 0.9
+  global_ttt_respect_doc_boundaries: True
+  global_ttt_warmup_chunks: 0
+  global_ttt_warmup_start_lr: 0.0
+  gptq_calibration_batches: 16
+  gptq_reserve_seconds: 4.0
+  grad_accum_steps: 8
+  grad_clip_norm: 0.3
+  is_main_process: True
+  iterations: 20000
+  ln_scale: True
+  local_rank: 0
+  logfile: logs/8f669c3a-79a0-45e1-9c06-8ab2f6a34df3.txt
+  logit_softcap: 30.0
+  loop_end: 5
+  loop_start: 3
+  lqer_asym_enabled: True
+  lqer_asym_group: 64
+  lqer_enabled: True
+  lqer_factor_bits: 4
+  lqer_rank: 4
+  lqer_top_k: 3
+  matrix_bits: 6
+  matrix_clip_sigmas: 12.85
+  matrix_lr: 0.026
+  max_wallclock_seconds: 300.0
+  min_lr: 0.0
+  mlp_clip_sigmas: 10.0
+  mlp_mult: 4.0
+  model_dim: 512
+  model_path: final_model.pt
+  muon_backend_steps: 5
+  muon_momentum: 0.97
+  muon_momentum_warmup_start: 0.92
+  muon_momentum_warmup_steps: 1500
+  muon_row_normalize: True
+  muon_wd: 0.095
+  num_heads: 8
+  num_kv_heads: 4
+  num_layers: 11
+  num_loops: 2
+  parallel_final_lane: mean
+  parallel_start_layer: 8
+  phased_ttt_num_phases: 1
+  phased_ttt_prefix_docs: 2000
+  qk_gain_init: 5.0
+  quantized_model_path: final_model.int6.ptz
+  rank: 0
+  rope_base: 10000.0
+  rope_dims: 16
+  rope_train_seq_len: 2048
+  rope_yarn: False
+  run_id: 8f669c3a-79a0-45e1-9c06-8ab2f6a34df3
+  scalar_lr: 0.02
+  seed: 42
+  skip_gates_enabled: True
+  smear_gate_enabled: True
+  sparse_attn_gate_enabled: True
+  sparse_attn_gate_init_std: 0.0
+  sparse_attn_gate_scale: 1.0
+  tie_embeddings: True
+  tied_embed_init_std: 0.005
+  tied_embed_lr: 0.03
+  tokenizer_path: ./data/tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+  train_batch_tokens: 8192
+  train_files: ./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_train_*.bin
+  train_log_every: 5
+  train_seq_len: 2048
+  ttt_batch_size: 64
+  ttt_beta1: 0.0
+  ttt_beta2: 0.999
+  ttt_chunk_size: 48
+  ttt_enabled: True
+  ttt_eval_batches: 
+  ttt_eval_seq_len: 2048
+  ttt_grad_steps: 1
+  ttt_k_lora: True
+  ttt_lora_lr: 0.0001
+  ttt_lora_rank: 96
+  ttt_mlp_lora: True
+  ttt_o_lora: True
+  ttt_optimizer: adam
+  ttt_weight_decay: 1.0
+  val_batch_tokens: 524288
+  val_bytes_files: ./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_val_bytes_*.bin
+  val_doc_fraction: 1.0
+  val_files: ./data/datasets/fineweb10B_sp8192_lossless_caps_caseops_v1_reserved/fineweb_val_*.bin
+  val_loss_every: 0
+  vocab_size: 8192
+  warmdown_frac: 0.75
+  warmup_steps: 5
+  world_size: 1
+  xsa_last_n: 11
+train_shards: 20
+val_tokens: 9662464
+torch.compile disabled (FA3_ENABLED=0, varlen fallback has dynamic shapes)
+model_params:35945671
+gptq:reserving 4s, effective=296000ms
+warmup_cu_buckets:64,128,192,256 iters_each:3
+/usr/lib/python3.12/contextlib.py:105: FutureWarning: `torch.backends.cuda.sdp_kernel()` is deprecated. In the future, this context manager will be removed. Please see `torch.nn.attention.sdpa_kernel()` for the new context manager, with updated signature.
+  self.gen = func(*args, **kwds)
+W0519 21:13:52.390000 66038 .venv/lib/python3.12/site-packages/torch/_inductor/utils.py:1137] [0/0] Not enough SMs to use max_autotune_gemm mode
+/root/projects/parameter-golf/.venv/lib/python3.12/site-packages/torch/_inductor/compile_fx.py:1948: UserWarning: NVIDIA GeForce GTX 1080 Ti does not support bfloat16 compilation natively, skipping
+  warnings.warn(
+warmup_step: 1/5
+/usr/lib/python3.12/contextlib.py:105: FutureWarning: `torch.backends.cuda.sdp_kernel()` is deprecated. In the future, this context manager will be removed. Please see `torch.nn.attention.sdpa_kernel()` for the new context manager, with updated signature.
+  self.gen = func(*args, **kwds)
+warmup_step: 2/5
+warmup_step: 3/5
+warmup_step: 4/5
+warmup_step: 5/5
+loop_warmup:enabled encoder:[0, 1, 2, 3, 4, 5, 3, 4] decoder:[5, 3, 4, 5, 6, 7, 8, 9, 10]
+loop_warmup_step: 1/5
+loop_warmup_step: 2/5
+loop_warmup_step: 3/5
+loop_warmup_step: 4/5
+loop_warmup_step: 5/5
+1/20000 train_loss: 9.0073 train_time: 0.2m tok/s: 675
+2/20000 train_loss: 15.3415 train_time: 0.4m tok/s: 674
+3/20000 train_loss: 15.6937 train_time: 0.6m tok/s: 678
+4/20000 train_loss: 12.8513 train_time: 0.8m tok/s: 680
+5/20000 train_loss: 13.1423 train_time: 1.0m tok/s: 680
+layer_loop:enabled step:9 frac:0.369 encoder:[0, 1, 2, 3, 4, 5, 3, 4] decoder:[5, 3, 4, 5, 6, 7, 8, 9, 10]
+10/20000 train_loss: 8.4466 train_time: 2.1m tok/s: 641
+15/20000 train_loss: 6.6820 train_time: 3.7m tok/s: 556
+20/20000 train_loss: 6.3517 train_time: 5.2m tok/s: 522
+20/20000 val_loss: 6.0865 val_bpb: 2.8335
+stopping_early: wallclock_cap train_time: 313801ms step: 20/20000
+peak memory allocated: 5774 MiB reserved: 10798 MiB
+ema:applying EMA weights
+diagnostic pre-quantization post-ema val_loss:9.00618731 val_bpb:4.19268535 eval_time:805014ms
+Serialized model: 135417128 bytes
+Code size (uncompressed): 162912 bytes
+Code size (compressed): 40637 bytes
+GPTQ:collecting Hessians from calibration data...
+/usr/lib/python3.12/contextlib.py:105: FutureWarning: `torch.backends.cuda.sdp_kernel()` is deprecated. In the future, this context manager will be removed. Please see `torch.nn.attention.sdpa_kernel()` for the new context manager, with updated signature.
+  self.gen = func(*args, **kwds)
+GPTQ:collected 67 Hessians in 1.3s
+Quantized weights:
+  gptq (int6): blocks.attn.c_k.weight, blocks.attn.c_q.weight, blocks.attn.c_v.weight, blocks.attn.proj.weight, blocks.mlp.fc.weight, blocks.mlp.proj.weight
+  gptq (int6)+lqer_asym: blocks.mlp.fc.weight
+  gptq (int8): tok_emb.weight
+  passthrough (float16): blocks.attn.attn_gate_w, blocks.attn.q_gain, blocks.attn_scale, blocks.mlp_scale, blocks.resid_mix, parallel_post_lambdas, parallel_resid_lambdas, skip_gates, skip_weights, smear_gate.weight, smear_lambda
+Serialized model quantized+brotli: 54147 bytes
+Total submission size quantized+brotli: 94784 bytes
+diagnostic quantized val_loss:9.01091385 val_bpb:4.19488571 eval_time:822353ms
+ttt_lora:warming up compile (random tokens, no val data)
+/root/projects/parameter-golf/train_gpt_sota.py:1580: UserWarning: Memory efficient kernel not used because: (Triggered internally at /pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.cpp:776.)
+  y = F.scaled_dot_product_attention(
+/root/projects/parameter-golf/train_gpt_sota.py:1580: UserWarning: Memory Efficient attention has been runtime disabled. (Triggered internally at /pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h:551.)
+  y = F.scaled_dot_product_attention(
+/root/projects/parameter-golf/train_gpt_sota.py:1580: UserWarning: Flash attention kernel not used because: (Triggered internally at /pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.cpp:778.)
+  y = F.scaled_dot_product_attention(
+/root/projects/parameter-golf/train_gpt_sota.py:1580: UserWarning: Flash attention only supports gpu architectures in the range [sm80, sm90]. Attempting to run on a sm 6.1 gpu. (Triggered internally at /pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.cpp:238.)
+  y = F.scaled_dot_product_attention(
+/root/projects/parameter-golf/train_gpt_sota.py:1580: UserWarning: CuDNN attention kernel not used because: (Triggered internally at /pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.cpp:780.)
+  y = F.scaled_dot_product_attention(
+/root/projects/parameter-golf/train_gpt_sota.py:1580: UserWarning: CuDNN attention has been runtime disabled. (Triggered internally at /pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.cpp:528.)
+  y = F.scaled_dot_product_attention(
+Traceback (most recent call last):
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 3823, in <module>
+    main()
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 3817, in main
+    train_and_eval(h, device)
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 3741, in train_and_eval
+    ptl = fwd_ttt_compiled(xw, yw, lora=wl)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 3715, in _fwd_ttt
+    return _fwd_ttt_compiled_inner(input_ids, target_ids, lora=lora)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 3707, in _fwd_ttt_inner
+    return ttt_model.forward_ttt(input_ids, target_ids, lora=lora)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 1504, in forward_ttt
+    x = self._block_with_lora(self.blocks[i], x, x0, lora, slot, q_w, k_w, v_w, out_w, up_w, down_w)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/projects/parameter-golf/train_gpt_sota.py", line 1580, in _block_with_lora
+    y = F.scaled_dot_product_attention(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: No available kernel. Aborting execution.
