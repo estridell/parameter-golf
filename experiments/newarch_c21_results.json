@@ -1,0 +1,17 @@
+{
+  "experiment": "NEWARCH_C21_GPTQ_AWQ_Combined",
+  "checkpoint": "checkpoints/newarch_sp8192.pt",
+  "baseline_loss": 5.30464768409729,
+  "quantized_loss": 4.955508857965469,
+  "accuracy_loss": -0.3491388261318207,
+  "original_bytes": 143766172,
+  "quantized_bytes": 27210318,
+  "compression_ratio": 5.283516789476698,
+  "protected_channels_pct": 0.9765625,
+  "n_calibration_batches": 32,
+  "tensor_categories": {
+    "combined_awq_gptq": 67,
+    "passthrough": 50
+  },
+  "time_seconds": 77.68127346038818
+}

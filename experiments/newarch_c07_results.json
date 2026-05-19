@@ -1,0 +1,14 @@
+{
+  "experiment": "NEWARCH_C07_INT6_PerRow",
+  "checkpoint": "checkpoints/newarch_sp8192.pt",
+  "original_bytes": 143766172,
+  "quantized_bytes": 27097422,
+  "compression_ratio": 5.305529507567178,
+  "mse": 2.6763615272079235e-06,
+  "clip_sigmas": 3.0,
+  "tensor_categories": {
+    "int6_perrow": 67,
+    "passthrough": 50
+  },
+  "time_seconds": 0.12046337127685547
+}

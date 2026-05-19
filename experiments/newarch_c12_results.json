@@ -1,0 +1,11 @@
+{
+  "experiment": "NEWARCH_C12_BitPacking",
+  "checkpoint": "checkpoints/newarch_sp8192.pt",
+  "original_bytes": 143766172,
+  "packed_bytes": 27097422,
+  "packed_data_bytes": 26935296,
+  "metadata_bytes": 162126,
+  "compression_ratio": 5.305529507567178,
+  "n_packed_tensors": 67,
+  "time_seconds": 0.15191173553466797
+}

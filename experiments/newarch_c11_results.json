@@ -1,0 +1,17 @@
+{
+  "experiment": "NEWARCH_C11_GPTQ_SelfGen",
+  "checkpoint": "checkpoints/newarch_sp8192.pt",
+  "baseline_loss": 5.30464768409729,
+  "quantized_loss": 5.185552090406418,
+  "accuracy_loss": -0.11909559369087219,
+  "original_bytes": 143766172,
+  "quantized_bytes": 28145998,
+  "compression_ratio": 5.107872600573623,
+  "n_calibration_batches": 32,
+  "tensor_categories": {
+    "gptq_int6": 66,
+    "passthrough": 50,
+    "gptq_int8": 1
+  },
+  "time_seconds": 54.78946328163147
+}

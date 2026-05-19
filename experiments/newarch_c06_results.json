@@ -1,0 +1,13 @@
+{
+  "experiment": "NEWARCH_C06_INT8_Pertensor",
+  "checkpoint": "checkpoints/newarch_sp8192.pt",
+  "original_bytes": 143766172,
+  "quantized_bytes": 35969626,
+  "compression_ratio": 3.996877031748954,
+  "mse": 3.4535385188426343e-07,
+  "tensor_categories": {
+    "passthrough": 50,
+    "int8_pertensor": 67
+  },
+  "time_seconds": 0.11665177345275879
+}
